@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
+import '../../services/prefs_service.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -11,6 +12,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   List<String> _exercises = [];
   Map<String, List<dynamic>> _history = {};
   bool _loading = true;
+  bool _useKg = true;
 
   @override
   void initState() {
@@ -19,6 +21,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Future<void> _load() async {
+    final useKg = await PrefsService.getUseKg();
     try {
       final names = await ApiService.getAllExercises();
       final history = <String, List<dynamic>>{};
@@ -28,12 +31,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
       setState(() {
         _exercises = List<String>.from(names);
         _history = history;
+        _useKg = useKg;
         _loading = false;
       });
     } catch (_) {
       setState(() => _loading = false);
     }
   }
+
+  String _displayWeight(num kg) => PrefsService.formatWeight(kg.toDouble(), _useKg);
 
   @override
   Widget build(BuildContext context) {
@@ -60,9 +66,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   ..._exercises.map((name) {
                     final logs = _history[name] ?? [];
                     if (logs.isEmpty) return const SizedBox.shrink();
-                    final latest = logs[0]['weight'] as num;
-                    final oldest = logs.last['weight'] as num;
-                    final delta = latest - oldest;
+                    final latestKg = (logs[0]['weight'] as num).toDouble();
+                    final oldestKg = (logs.last['weight'] as num).toDouble();
+                    final deltaKg = latestKg - oldestKg;
+                    final deltaDisplay = _useKg ? deltaKg : PrefsService.kgToLbs(deltaKg);
+
                     return Container(
                       margin: const EdgeInsets.only(bottom: 16),
                       decoration: BoxDecoration(
@@ -81,8 +89,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                 style: const TextStyle(fontSize: 9, color: Color(0xFF444444), letterSpacing: 1)),
                             ])),
                             Text(
-                              delta >= 0 ? '+${delta.toStringAsFixed(1)}kg' : '${delta.toStringAsFixed(1)}kg',
-                              style: TextStyle(fontSize: 11, color: delta >= 0 ? const Color(0xFF6EE7B7) : const Color(0xFFF87171)),
+                              deltaDisplay >= 0
+                                ? '+${deltaDisplay.toStringAsFixed(1)}${_useKg ? 'kg' : 'lbs'}'
+                                : '${deltaDisplay.toStringAsFixed(1)}${_useKg ? 'kg' : 'lbs'}',
+                              style: TextStyle(fontSize: 11, color: deltaDisplay >= 0 ? const Color(0xFF6EE7B7) : const Color(0xFFF87171)),
                             ),
                           ]),
                         ),
@@ -90,33 +100,33 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         ...logs.take(4).map((log) {
                           final date = DateTime.parse(log['createdAt']).toLocal();
                           final idx = logs.indexOf(log);
-                          final prev = idx < logs.length - 1 ? logs[idx + 1]['weight'] as num : log['weight'] as num;
-                          final d = (log['weight'] as num) - prev;
+                          final currKg = (log['weight'] as num).toDouble();
+                          final prevKg = idx < logs.length - 1 ? (logs[idx + 1]['weight'] as num).toDouble() : currKg;
+                          final dKg = currKg - prevKg;
+                          final dDisplay = _useKg ? dKg : PrefsService.kgToLbs(dKg);
                           final splitDay = log['splitDay'] ?? '—';
+
                           return Container(
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                            decoration: const BoxDecoration(
-                              border: Border(bottom: BorderSide(color: Color(0xFF252525))),
-                            ),
+                            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFF252525)))),
                             child: Row(children: [
-                              Expanded(
-                                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                  Text('${date.day} ${_month(date.month)} ${date.year}',
-                                    style: const TextStyle(fontSize: 9, color: Color(0xFF555555))),
-                                  const SizedBox(height: 2),
-                                  Text(splitDay,
-                                    style: const TextStyle(fontSize: 8, color: Color(0xFF444444), letterSpacing: 0.5)),
-                                ]),
-                              ),
-                              Text('${log['weight']}kg',
+                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text('${date.day} ${_month(date.month)} ${date.year}',
+                                  style: const TextStyle(fontSize: 9, color: Color(0xFF555555))),
+                                const SizedBox(height: 2),
+                                Text(splitDay, style: const TextStyle(fontSize: 8, color: Color(0xFF444444), letterSpacing: 0.5)),
+                              ])),
+                              Text(_displayWeight(log['weight'] as num),
                                 style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFE8E8E8))),
                               const SizedBox(width: 12),
                               SizedBox(
-                                width: 36,
+                                width: 42,
                                 child: Text(
-                                  idx == logs.length - 1 ? '—' : d >= 0 ? '+${d.toStringAsFixed(1)}' : d.toStringAsFixed(1),
+                                  idx == logs.length - 1 ? '—'
+                                    : dDisplay >= 0 ? '+${dDisplay.toStringAsFixed(1)}'
+                                    : dDisplay.toStringAsFixed(1),
                                   textAlign: TextAlign.right,
-                                  style: TextStyle(fontSize: 9, color: d > 0 ? const Color(0xFF6EE7B7) : d < 0 ? const Color(0xFFF87171) : const Color(0xFF444444)),
+                                  style: TextStyle(fontSize: 9, color: dDisplay > 0 ? const Color(0xFF6EE7B7) : dDisplay < 0 ? const Color(0xFFF87171) : const Color(0xFF444444)),
                                 ),
                               ),
                             ]),

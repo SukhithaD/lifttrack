@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
+import '../../services/prefs_service.dart';
 
 class LogScreen extends StatefulWidget {
   const LogScreen({super.key});
@@ -12,20 +13,22 @@ class _LogScreenState extends State<LogScreen> {
   final List<Map<String, dynamic>> _exercises = [];
   bool _saving = false;
   List<String> _allExerciseNames = [];
+  bool _useKg = true;
 
   final List<String> _splitOptions = ['Push', 'Pull', 'Legs', 'Upper'];
 
   Future<void> _startWorkout(String split) async {
-    // Load existing exercise names for autocomplete
     try {
       final names = await ApiService.getAllExercises();
       _allExerciseNames = List<String>.from(names);
     } catch (_) {
       _allExerciseNames = [];
     }
+    final useKg = await PrefsService.getUseKg();
     setState(() {
       _activeSplit = split;
       _exercises.clear();
+      _useKg = useKg;
     });
     if (mounted) Navigator.pop(context);
   }
@@ -34,9 +37,7 @@ class _LogScreenState extends State<LogScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1E1E1E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(8))),
       builder: (_) => Padding(
         padding: const EdgeInsets.all(28),
         child: Column(
@@ -81,13 +82,19 @@ class _LogScreenState extends State<LogScreen> {
     final valid = _exercises.where((e) {
       return (e['nameController'] as TextEditingController).text.isNotEmpty &&
              (e['weightController'] as TextEditingController).text.isNotEmpty;
-    }).map((e) => {
-      'name': (e['nameController'] as TextEditingController).text.trim(),
-      'weight': double.tryParse((e['weightController'] as TextEditingController).text.replaceAll(',', '.')) ?? 0,
-      if ((e['setsController'] as TextEditingController).text.isNotEmpty)
-        'sets': int.tryParse((e['setsController'] as TextEditingController).text),
-      if ((e['repsController'] as TextEditingController).text.isNotEmpty)
-        'reps': int.tryParse((e['repsController'] as TextEditingController).text),
+    }).map((e) {
+      final rawWeight = double.tryParse(
+        (e['weightController'] as TextEditingController).text.replaceAll(',', '.')) ?? 0;
+      // Always save as kg in the database
+      final weightInKg = _useKg ? rawWeight : PrefsService.lbsToKg(rawWeight);
+      return {
+        'name': (e['nameController'] as TextEditingController).text.trim(),
+        'weight': double.parse(weightInKg.toStringAsFixed(2)),
+        if ((e['setsController'] as TextEditingController).text.isNotEmpty)
+          'sets': int.tryParse((e['setsController'] as TextEditingController).text),
+        if ((e['repsController'] as TextEditingController).text.isNotEmpty)
+          'reps': int.tryParse((e['repsController'] as TextEditingController).text),
+      };
     }).toList();
 
     if (valid.isEmpty) {
@@ -103,10 +110,7 @@ class _LogScreenState extends State<LogScreen> {
       setState(() { _activeSplit = null; _exercises.clear(); });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$_activeSplit session saved'),
-            backgroundColor: const Color(0xFF1E2A1E),
-          ),
+          SnackBar(content: Text('$_activeSplit session saved'), backgroundColor: const Color(0xFF1E2A1E)),
         );
       }
     } catch (_) {
@@ -146,6 +150,8 @@ class _LogScreenState extends State<LogScreen> {
         ),
       );
     }
+
+    final weightLabel = _useKg ? 'WEIGHT (KG)' : 'WEIGHT (LBS)';
 
     return SafeArea(
       child: Column(
@@ -202,19 +208,16 @@ class _LogScreenState extends State<LogScreen> {
                         ),
                       ]),
                       const SizedBox(height: 10),
-                      // Autocomplete exercise name field
                       Autocomplete<String>(
                         optionsBuilder: (textEditingValue) {
                           if (textEditingValue.text.isEmpty) return const [];
                           return _allExerciseNames.where((name) =>
-                            name.toLowerCase().contains(textEditingValue.text.toLowerCase())
-                          );
+                            name.toLowerCase().contains(textEditingValue.text.toLowerCase()));
                         },
                         onSelected: (selected) {
                           (ex['nameController'] as TextEditingController).text = selected;
                         },
                         fieldViewBuilder: (context, controller, focusNode, onSubmitted) {
-                          // Sync with our stored controller
                           controller.text = (ex['nameController'] as TextEditingController).text;
                           controller.addListener(() {
                             (ex['nameController'] as TextEditingController).text = controller.text;
@@ -260,7 +263,7 @@ class _LogScreenState extends State<LogScreen> {
                       ),
                       const SizedBox(height: 10),
                       Row(children: [
-                        Expanded(child: _fieldInput('WEIGHT (KG)', ex['weightController'], keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                        Expanded(child: _fieldInput(weightLabel, ex['weightController'], keyboardType: const TextInputType.numberWithOptions(decimal: true))),
                         const SizedBox(width: 8),
                         Expanded(child: _fieldInput('SETS', ex['setsController'], hint: 'optional')),
                         const SizedBox(width: 8),
